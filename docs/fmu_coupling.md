@@ -21,6 +21,39 @@ the latest simulation state. The backend advances three coupled pieces:
 The thermal adapter returns a `ThermalSnapshot` through the API. The Overview
 page uses that snapshot for the HMI values and thermal-hydraulic trend chart.
 
+## Power And Shape Sources
+
+| Quantity | Current source | Default or fallback |
+| --- | --- | --- |
+| Total thermal power | `ReactorEngine`: nominal 20 MW times neutron population; batch-averaged by `SimulationService` | The same kinetics power drives both FMU and thermal fallback. |
+| Eight axial fractions during stepping | `core_service.compute_axial_power_fractions_8()` from the cached legacy one-group diffusion solve | Uniform only if the computed profile has nonpositive total. |
+| Fractions at FMU initialization/reset | `ThermalAdapter._ensure_instance()` | Eight uniform fractions of 0.125, before the first calculated-profile update. |
+| Thermal outputs | Modelica co-simulation FMU | Python surrogate on initialization or stepping failure, reported as `source="fallback"`. |
+
+Modelica distributes the supplied total power as
+`nodeHeatFlow[i] = totalPower * normalizedFractions[i]`. The four-group Core
+page's CE-corrected power map is a separate calculation; it does not determine
+the Overview power amplitude or the FMU heat fractions.
+
+The legacy helper samples flux at one radius in its homogenized fuel annulus,
+averages eight index ranges along the full solver axial grid, reverses them
+to top-to-bottom order, and normalizes their sum to one. The solver grid
+includes axial reflectors and extrapolation. This is an approximate shape,
+not a fuel-volume integral over eight active-fuel bins. Its cache key rounds
+insertion fraction to two decimal places (approximately 1% insertion bins),
+even though the Overview slider accepts 0.1% increments.
+
+An exception from the shape solve is not caught as a uniform-profile fallback
+by the helper. A control-action refresh catches it and retains the last
+thermal snapshot; the normal advancing path can propagate the exception.
+These shape limitations are separate from the adapter's thermal fallback.
+
+The intended replacement is to integrate four-group fuel power over volume,
+map it conservatively into the eight active-core nodes, and initialize the FMU
+with the same profile used during stepping. Total power should continue to
+come from point kinetics so changing a steady eigenfunction's normalization
+does not change reactor power.
+
 ## Modelica Interface
 
 The backend expects an FMU exported from:
@@ -72,9 +105,16 @@ An existing FMU is reused only when all of these are true:
 
 These checks validate the FMI contract and build flags, but they do not
 currently verify that the FMU contains a binary for the host platform. The
-tracked FMU contains `binaries/linux64`; it cannot be instantiated directly on
+existing local FMU contains `binaries/linux64`; it cannot be instantiated directly on
 macOS. A non-Linux host must export a local FMU with OpenModelica after removing
 the Linux artifact, or the adapter will use its fallback model.
+
+There is also a solver-flag reuse bug: `_fmu_has_expected_flags()` searches
+the flags resource for the literal string `s:cvode`, while OpenModelica writes
+JSON such as `{"s": "cvode"}`. A valid FMU can therefore be rejected for reuse
+and rebuilt on reset/startup. If that rebuild succeeds, the FMU still runs;
+if it fails, the adapter activates fallback. The check needs structured JSON
+comparison as well as host-binary validation.
 
 If any check fails, the adapter deletes the stale FMU and runs an OpenModelica
 script equivalent to:
@@ -194,7 +234,7 @@ Common causes:
 - the FMU is older than `ResearchReactorThermalHydraulics.mo`
 - the FMU does not contain a binary for the current operating system
 - the FMU is missing required variables such as `T_fuelEff` or `rho_m_eff`
-- the FMU was built without the expected `s:cvode` FMI flag
+- the FMU lacks the expected CVODE flag, or the current flag-check bug rejects its valid JSON representation
 - OpenModelica failed to export a fresh FMU
 - FMPy could not instantiate or step the co-simulation slave
 

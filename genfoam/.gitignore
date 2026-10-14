@@ -2,10 +2,8 @@
 generated/
 polyMesh/
 
-system/controlDict
-system/regionsDict
-system/neutroRegion/
-constant/neutroRegion/
+# Generated nuclear data and initial flux; solver dictionaries are case inputs.
+constant/neutroRegion/nuclearData
 0/neutroRegion/defaultFlux*
 
 *.foam

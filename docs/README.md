@@ -23,6 +23,8 @@ runtime coupling, and historical material.
 - [MGXS to Diffusion Workflow](diffusion_mgxs_workflow.md) defines the
   scattering, adapter, finite-volume, cache, Core-page, and offline SPH
   contracts.
+- [GeN-Foam Workflow](../genfoam/README.md) explains the separate offline
+  cell-wise MGXS export, Gmsh mesh, named-zone mapping, and reuse limitations.
 
 ## Historical Material
 
